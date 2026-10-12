@@ -1,0 +1,32 @@
+{
+  "name": "trebot",
+  "version": "1.0.0",
+  "description": "Bot do Discord para o sistema eleitoral do TRE — fundação de partidos políticos.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "test": "node tests/smoke.js",
+    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/database/index.js && node --check src/events/InteractionCreate.js && node --check src/events/ready.js && node --check src/commands/ping.js && node --check src/commands/config.js && node --check src/commands/fundar-partido.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/K44Ll/trebot.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/K44Ll/trebot/issues"
+  },
+  "homepage": "https://github.com/K44Ll/trebot#readme",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "discord.js": "^14.27.0",
+    "dotenv": "^18.0.7"
+  }
+}
