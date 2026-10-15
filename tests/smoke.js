@@ -11,6 +11,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const SQLite = require('better-sqlite3');
 
 const DB_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'trebot-test-'));
 process.env.DB_PATH = path.join(DB_DIR, 'partidos.db');
@@ -106,6 +107,47 @@ async function main() {
         assert.ok(comandos['fundar-partido'])
     );
     await teste('config registrado', () => assert.ok(comandos.config));
+    await teste('comandos de filiação e candidatura registrados', () => {
+        assert.ok(comandos.filiar);
+        assert.ok(comandos['pedidos-filiacao']);
+        assert.ok(comandos.candidatar);
+        assert.ok(comandos['pedidos-candidatura']);
+        assert.equal(typeof comandos.filiar.autocomplete, 'function');
+        assert.equal(typeof comandos.candidatar.autocomplete, 'function');
+    });
+    await teste('roteador atende autocomplete e customIds dinâmicos', async () => {
+        const roteador = require(path.join(SRC, 'events', 'InteractionCreate'));
+        const chamadas = [];
+        const client = {
+            commands: new Map([
+                [
+                    'filiar',
+                    {
+                        autocomplete: async interaction =>
+                            interaction.respond([{ name: 'opção', value: '1' }])
+                    }
+                ]
+            ]),
+            componentHandlers: new Map([
+                ['tb_teste:*', async interaction => chamadas.push(interaction.customId)]
+            ])
+        };
+        const autocomplete = {
+            isAutocomplete: () => true,
+            commandName: 'filiar',
+            respond: async choices => chamadas.push(choices[0].value)
+        };
+        await roteador.execute(autocomplete, client);
+        const button = {
+            isAutocomplete: () => false,
+            isChatInputCommand: () => false,
+            isModalSubmit: () => false,
+            isMessageComponent: () => true,
+            customId: 'tb_teste:123'
+        };
+        await roteador.execute(button, client);
+        assert.deepEqual(chamadas, ['1', 'tb_teste:123']);
+    });
 
     console.log('\n[2] Slash commands serializam');
     for (const [nome, cmd] of Object.entries(comandos)) {
@@ -125,6 +167,15 @@ async function main() {
         await config.execute(interaction);
         assert.ok(capturado.reply.embeds);
         assert.strictEqual(capturado.reply.flags, MessageFlags.Ephemeral);
+
+        const novaEleicao = fakeInteraction({
+            options: {
+                getSubcommand: () => 'criar-eleicao',
+                getInteger: () => 2
+            }
+        });
+        await config.execute(novaEleicao.interaction);
+        assert.match(novaEleicao.capturado.reply.content, /Eleição \*\*#\d+\*\*/);
 
         const fundarSemConfig = fakeInteraction();
         await comandos['fundar-partido'].execute(fundarSemConfig.interaction);
@@ -398,6 +449,341 @@ async function main() {
     await teste('nome: único e case-insensitive', () => {
         assert.strictEqual(database.nomeEmUso('partido gama', 'u9', '1'), true);
         assert.strictEqual(database.nomeEmUso('Partido Gama', 'u1', '1'), false);
+    });
+
+    await teste('eleição salva n e calcula as vagas eleitorais', () => {
+        const eleicao = database.criarEleicao('1', 2);
+        assert.strictEqual(database.obterEleicao('1', eleicao.id).n, 2);
+        assert.deepStrictEqual(database.vagasPorCargo(2), {
+            presidente: 1,
+            'vice-presidente': 1,
+            governador: 1,
+            'deputado-federal': 6,
+            senador: 3
+        });
+        assert.equal(database.vagasPorCargo(1).senador, 2);
+        assert.equal(database.vagasPorCargo(3).senador, 5);
+        assert.throws(() => database.criarEleicao('1', 0), /n deve ser/);
+        assert.throws(() => database.vagasPorCargo(501), /n deve ser/);
+    });
+
+    await teste('políticos guardam partido e posição eleitoral', () => {
+        const partido = database.listarPartidos('1')[0];
+        assert.ok(partido, 'u1 fundou o partido nos testes de apoio');
+        const politico = database.salvarPolitico({
+            guildId: '1',
+            discordId: 'politico-presidente',
+            nome: 'Candidata Presidente',
+            partidoId: partido.id,
+            posicao: 'presidente'
+        });
+        assert.strictEqual(politico.partido_id, partido.id);
+        assert.strictEqual(politico.posicao, 'presidente');
+        assert.strictEqual(
+            database.listarPoliticos('1')[0].partido_sigla,
+            partido.sigla
+        );
+        assert.throws(
+            () =>
+                database.salvarPolitico({
+                    guildId: '1',
+                    discordId: 'politico-invalido',
+                    nome: 'Cargo inválido',
+                    posicao: 'ministro'
+                }),
+            /cargo eleitoral válido/
+        );
+
+        const semPartido = database.salvarPolitico({
+            guildId: '1',
+            discordId: 'politico-sem-partido',
+            nome: 'Sem partido'
+        });
+        assert.strictEqual(semPartido.partido_id, null);
+    });
+
+    await teste('candidatos ficam ligados à eleição, político e partido', () => {
+        const eleicao = database.listarEleicoes('1')[0];
+        const presidente = database.registrarCandidato({
+            guildId: '1',
+            eleicaoId: eleicao.id,
+            politicoId: 'politico-presidente',
+            cargo: 'presidente'
+        });
+        assert.strictEqual(
+            presidente.partido_id,
+            database.obterPolitico('1', 'politico-presidente').partido_id
+        );
+        assert.strictEqual(presidente.cargo, 'presidente');
+
+        const candidatos = database.listarCandidatos('1', eleicao.id);
+        assert.strictEqual(candidatos.length, 1);
+        assert.strictEqual(candidatos[0].politico_nome, 'Candidata Presidente');
+        assert.strictEqual(
+            candidatos[0].partido_sigla,
+            database.listarPartidos('1')[0].sigla
+        );
+
+        assert.throws(
+            () =>
+                database.registrarCandidato({
+                    guildId: '1',
+                    eleicaoId: eleicao.id,
+                    politicoId: 'politico-presidente',
+                    cargo: 'senador'
+                }),
+            /UNIQUE constraint failed/
+        );
+        assert.throws(
+            () =>
+                database.registrarCandidato({
+                    guildId: '1',
+                    eleicaoId: eleicao.id,
+                    politicoId: 'politico-sem-partido',
+                    cargo: 'senador'
+                }),
+            /precisa estar filiado/
+        );
+        assert.throws(
+            () =>
+                database.registrarCandidato({
+                    guildId: '2',
+                    eleicaoId: eleicao.id,
+                    politicoId: 'politico-presidente',
+                    cargo: 'senador'
+                }),
+            /eleição não existe/
+        );
+        assert.throws(
+            () => database.removerPolitico('1', 'politico-presidente'),
+            /FOREIGN KEY constraint failed/
+        );
+    });
+
+    await teste('filiação exige aprovação do fundador', () => {
+        const partido = database.listarPartidos('1')[0];
+        const pedidoId = database.solicitarFiliacao({
+            guildId: '1',
+            partidoId: partido.id,
+            discordId: 'novo-filiado',
+            nome: 'Novo Filiado'
+        });
+        assert.equal(
+            database.listarPedidosFiliacaoPorDono('1', 'u1').some(
+                pedido => pedido.id === pedidoId
+            ),
+            true
+        );
+        assert.equal(
+            database.decidirPedidoFiliacao({
+                guildId: '1',
+                pedidoId,
+                donoId: 'intruso',
+                aceitar: true
+            }).resultado,
+            'nao_autorizado'
+        );
+        assert.equal(database.obterPolitico('1', 'novo-filiado'), null);
+        assert.equal(
+            database.decidirPedidoFiliacao({
+                guildId: '1',
+                pedidoId,
+                donoId: 'u1',
+                aceitar: true
+            }).resultado,
+            'aceito'
+        );
+        assert.equal(
+            database.obterPolitico('1', 'novo-filiado').partido_id,
+            partido.id
+        );
+        assert.throws(
+            () =>
+                database.solicitarFiliacao({
+                    guildId: '1',
+                    partidoId: partido.id,
+                    discordId: 'novo-filiado',
+                    nome: 'Novo Filiado'
+                }),
+            /já é filiado/
+        );
+
+        const pedidoRecusado = database.solicitarFiliacao({
+            guildId: '1',
+            partidoId: partido.id,
+            discordId: 'filiacao-recusada',
+            nome: 'Solicitante recusado'
+        });
+        assert.equal(
+            database.decidirPedidoFiliacao({
+                guildId: '1',
+                pedidoId: pedidoRecusado,
+                donoId: 'u1',
+                aceitar: false
+            }).resultado,
+            'recusado'
+        );
+        assert.equal(database.obterPolitico('1', 'filiacao-recusada'), null);
+    });
+
+    await teste('candidatura usa número do partido e exige aprovação', () => {
+        const eleicao = database.criarEleicao('1', 3);
+        const pedido = database.solicitarCandidatura({
+            guildId: '1',
+            eleicaoId: eleicao.id,
+            politicoId: 'novo-filiado',
+            nome: 'Novo Filiado',
+            cargo: 'senador',
+            sufixo: '7'
+        });
+        assert.equal(pedido.numero, '017');
+        assert.equal(pedido.status, 'pendente');
+        assert.equal(
+            database.listarPedidosCandidaturaPorDono('1', 'u1').some(
+                item => item.id === pedido.id
+            ),
+            true
+        );
+        assert.equal(
+            database.decidirPedidoCandidatura({
+                guildId: '1',
+                pedidoId: pedido.id,
+                donoId: 'intruso',
+                aceitar: true
+            }).resultado,
+            'nao_autorizado'
+        );
+        assert.equal(
+            database.decidirPedidoCandidatura({
+                guildId: '1',
+                pedidoId: pedido.id,
+                donoId: 'u1',
+                aceitar: true
+            }).resultado,
+            'aceito'
+        );
+        assert.equal(
+            database.listarCandidatos('1', eleicao.id)[0].status,
+            'aprovado'
+        );
+        assert.throws(
+            () =>
+                database.solicitarCandidatura({
+                    guildId: '1',
+                    eleicaoId: eleicao.id,
+                    politicoId: 'novo-filiado',
+                    nome: 'Novo Filiado',
+                    cargo: 'deputado-federal',
+                    sufixo: '12'
+                }),
+            /complemento/
+        );
+
+        database.salvarPolitico({
+            guildId: '1',
+            discordId: 'candidatura-recusada',
+            nome: 'Candidato recusado',
+            partidoId: database.listarPartidos('1')[0].id
+        });
+        const candidaturaRecusada = database.solicitarCandidatura({
+            guildId: '1',
+            eleicaoId: eleicao.id,
+            politicoId: 'candidatura-recusada',
+            nome: 'Candidato recusado',
+            cargo: 'deputado-federal',
+            sufixo: '0001'
+        });
+        assert.equal(
+            database.decidirPedidoCandidatura({
+                guildId: '1',
+                pedidoId: candidaturaRecusada.id,
+                donoId: 'u1',
+                aceitar: false
+            }).resultado,
+            'recusado'
+        );
+        assert.equal(
+            database.listarCandidatos('1', eleicao.id).find(
+                item => item.id === candidaturaRecusada.id
+            ).status,
+            'recusado'
+        );
+    });
+
+    await teste('número de partido inativo há 21 dias é liquidado e reutilizado', () => {
+        const guildId = 'reaproveitamento';
+        const eleicao = database.criarEleicao(guildId, 1);
+        const agora = new Date().toISOString();
+        const inatividade = new Date(Date.now() - 22 * 24 * 60 * 60 * 1000)
+            .toISOString();
+        const sql = new SQLite(process.env.DB_PATH);
+        let novoPartidoId;
+        try {
+            const inserirPartido = sql.prepare(`
+                INSERT INTO partidos (
+                    guild_id, fundador_id, fundador_nome, nome, sigla, emoji,
+                    posicionamento, propostas, valores, fundado_em,
+                    numero_eleitoral, status, ultima_atividade_em
+                ) VALUES (?, ?, ?, ?, ?, '🏛️', 'Centro', '', '', ?, ?, 'ativo', ?)
+            `);
+            for (let numero = 1; numero <= 99; numero++) {
+                inserirPartido.run(
+                    guildId,
+                    `fundador-${numero}`,
+                    'Fundador',
+                    `Partido ${numero}`,
+                    `P${String(numero).padStart(2, '0')}`,
+                    agora,
+                    numero,
+                    numero === 1 ? inatividade : agora
+                );
+            }
+
+            const insercaoNovo = inserirPartido.run(
+                guildId,
+                'fundador-novo',
+                'Fundador novo',
+                'Partido novo',
+                'PN',
+                agora,
+                null,
+                agora
+            );
+            novoPartidoId = Number(insercaoNovo.lastInsertRowid);
+            sql.prepare(`
+                INSERT INTO politicos (
+                    guild_id, discord_id, nome, partido_id, posicao,
+                    criado_em, atualizado_em
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?)
+            `).run(
+                guildId,
+                'candidato-novo',
+                'Candidato novo',
+                novoPartidoId,
+                agora,
+                agora
+            );
+        } finally {
+            sql.close();
+        }
+
+        const pedido = database.solicitarCandidatura({
+            guildId,
+            eleicaoId: eleicao.id,
+            politicoId: 'candidato-novo',
+            nome: 'Candidato novo',
+            cargo: 'senador',
+            sufixo: '4'
+        });
+        const partidos = database.listarPartidos(guildId);
+        const antigo = partidos.find(partido => partido.numero_eleitoral === 1);
+        const novo = partidos.find(partido => partido.id === novoPartidoId);
+
+        assert.equal(pedido.numero, '014');
+        assert.equal(antigo.status, 'liquidado');
+        assert.equal(antigo.substituido_por_id, novoPartidoId);
+        assert.equal(novo.numero_eleitoral, 1);
+        assert.equal(novo.substitui_partido_id, antigo.id);
     });
 
     await teste('mesmo fundador pode ter uma proposta isolada em outro servidor', () => {

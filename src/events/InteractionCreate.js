@@ -7,6 +7,16 @@ module.exports = {
 
     async execute(interaction, client) {
         try {
+            if (interaction.isAutocomplete()) {
+                const command = client.commands.get(interaction.commandName);
+                if (!command?.autocomplete) {
+                    await interaction.respond([]);
+                    return;
+                }
+                await command.autocomplete(interaction, client);
+                return;
+            }
+
             if (interaction.isChatInputCommand()) {
                 const command = client.commands.get(interaction.commandName);
 
@@ -19,9 +29,20 @@ module.exports = {
             // Modais, botões e selects são roteados pelo customId, registrado
             // por cada comando em `componentHandlers`.
             if (interaction.isModalSubmit() || interaction.isMessageComponent()) {
-                const handler = client.componentHandlers.get(
-                    interaction.customId
-                );
+                let handler = client.componentHandlers.get(interaction.customId);
+                if (!handler) {
+                    for (const [customId, registeredHandler] of client.componentHandlers) {
+                        if (
+                            customId.endsWith('*') &&
+                            interaction.customId.startsWith(
+                                customId.slice(0, -1)
+                            )
+                        ) {
+                            handler = registeredHandler;
+                            break;
+                        }
+                    }
+                }
 
                 if (!handler) return;
 

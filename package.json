@@ -10,8 +10,8 @@
   "scripts": {
     "start": "node src/index.js",
     "deploy": "node src/deploy-commands.js",
-    "test": "node tests/smoke.js",
-    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/database/index.js && node --check src/events/InteractionCreate.js && node --check src/events/ready.js && node --check src/commands/ping.js && node --check src/commands/config.js && node --check src/commands/fundar-partido.js"
+    "test": "node tests/smoke.js && node tests/admin.js && node tests/eleicoes.js",
+    "check": "node --check src/index.js && node --check src/deploy-commands.js && node --check src/database/index.js && node --check src/database/eleicoes.js && node --check src/web/admin.js && node --check src/ui/console.js && node --check src/events/InteractionCreate.js && node --check src/events/ready.js && node --check src/commands/ping.js && node --check src/commands/config.js && node --check src/commands/fundar-partido.js && node --check src/commands/filiar.js && node --check src/commands/pedidos-filiacao.js && node --check src/commands/candidatar.js && node --check src/commands/pedidos-candidatura.js && node --check src/commands/eleicao.js && node --check src/services/eleicoes/candidatos-service.js && node --check src/services/eleicoes/permissoes-service.js && node --check src/services/eleicoes/apuracao-service.js && node --check src/services/eleicoes/scheduler-service.js && node --check src/services/eleicoes/urna-service.js"
   },
   "repository": {
     "type": "git",

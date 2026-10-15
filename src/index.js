@@ -3,15 +3,26 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { Client, GatewayIntentBits, Collection } = require('discord.js');
+const {
+    ChannelType,
+    Client,
+    GatewayIntentBits,
+    Collection
+} = require('discord.js');
 
 require('dotenv').config();
 
 const database = require('./database');
+const databaseEleicoes = require('./database/eleicoes');
+const { iniciarPainel } = require('./web/admin');
+const { animarInicializacao } = require('./ui/console');
 
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
+
+client.animacaoInicializacao = animarInicializacao();
+client.adminPanel = null;
 
 client.commands = new Collection();
 // customId -> handler, montado a partir de `componentHandlers` de cada comando.
@@ -127,6 +138,65 @@ if (!token) {
     process.exit(1);
 }
 
+const adminPassword = process.env.ADMIN_PASSWORD;
+if (!adminPassword) {
+    console.log(
+        '[ADMIN PANEL] Desativado. Defina ADMIN_PASSWORD (mínimo de 16 caracteres) para habilitá-lo.'
+    );
+} else {
+    const host = process.env.ADMIN_HOST || '127.0.0.1';
+    const port = Number(process.env.ADMIN_PORT || 3000);
+    client.adminPanel = {
+        host,
+        port,
+        cookieSecure: process.env.ADMIN_COOKIE_SECURE !== 'false',
+        server: null,
+        error: null
+    };
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        console.error('[ADMIN PANEL] ADMIN_PORT deve ser entre 1 e 65535.');
+        client.adminPanel.error = new Error(
+            'ADMIN_PORT deve ser entre 1 e 65535.'
+        );
+    } else {
+        try {
+            const painel = iniciarPainel({
+                password: adminPassword,
+                host,
+                port,
+                cookieSecure: client.adminPanel.cookieSecure,
+                publicOrigin: process.env.ADMIN_PUBLIC_ORIGIN,
+                database,
+                getGuilds: () => client.guilds.cache.values(),
+                getTextChannel: async (guildId, channelId) => {
+                    const guild = client.guilds.cache.get(guildId);
+                    if (!guild) return null;
+                    const channel = await guild.channels.fetch(channelId);
+                    if (
+                        !channel ||
+                        channel.guildId !== guildId ||
+                        ![
+                            ChannelType.GuildText,
+                            ChannelType.GuildAnnouncement
+                        ].includes(channel.type)
+                    ) {
+                        return null;
+                    }
+                    return channel;
+                }
+            });
+            client.adminPanel.server = painel;
+            painel.on('error', error => {
+                client.adminPanel.error = error;
+                console.error('[ADMIN PANEL] Falha ao iniciar o servidor web:', error);
+            });
+        } catch (error) {
+            client.adminPanel.error = error;
+            console.error('[ADMIN PANEL] Painel não iniciado:', error.message);
+        }
+    }
+}
+
 client.login(token).catch(error => {
     console.error('[ERRO] Falha ao autenticar com o Discord:', error.message);
     process.exit(1);
@@ -135,8 +205,11 @@ client.login(token).catch(error => {
 for (const sinal of ['SIGINT', 'SIGTERM']) {
     process.on(sinal, () => {
         console.log(`\n[${sinal}] Encerrando...`);
+        client.adminPanel?.server?.close();
         client.destroy();
         database.fechar();
+        databaseEleicoes.fechar();
         process.exit(0);
     });
 }
+
