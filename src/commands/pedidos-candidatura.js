@@ -49,14 +49,15 @@ async function decidir(interaction) {
         recusado: 'Candidatura recusada.',
         nao_autorizado: 'Somente o fundador do partido pode decidir esta candidatura.',
         indisponivel: 'Este pedido já foi respondido ou não está mais disponível.',
-        partido_inativo: 'O partido foi liquidado; esta candidatura foi cancelada.'
+        partido_inativo: 'O partido foi liquidado; esta candidatura foi cancelada.',
+        inabilitado: `A pessoa está inabilitada para função pública até ${resultado.fim_em}; a candidatura foi recusada.`
     };
     const conteudo =
         mensagens[resultado.resultado] ??
         'Não foi possível concluir a decisão.';
 
     if (
-        ['aceito', 'recusado', 'partido_inativo'].includes(
+        ['aceito', 'recusado', 'partido_inativo', 'inabilitado'].includes(
             resultado.resultado
         )
     ) {

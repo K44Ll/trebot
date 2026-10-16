@@ -26,6 +26,7 @@ Bot do Discord para o sistema eleitoral do TRE — fundação de partidos polít
    | `TOKEN`     | Developer Portal → Bot → *Reset Token*                           |
    | `CLIENT_ID` | Developer Portal → General Information → *Application ID*         |
    | `GUILD_ID`  | (opcional) ID do servidor de testes; deixe vazio para deploy global |
+   | `ROTEIA_KEY` | Chave da API Roteia (opcional; usada pelo assistente eleitoral) |
 
    > O `.env` contém credenciais e está no `.gitignore`. Nunca faça commit dele.
 
@@ -43,6 +44,14 @@ Bot do Discord para o sistema eleitoral do TRE — fundação de partidos polít
    ```bash
    npm start
    ```
+
+5. Para habilitar respostas ao mencionar o bot, ative **Message Content Intent**
+   no Developer Portal e defina `ROTEIA_KEY` no `.env`. O bot usa o modelo
+   `nvidia/nemotron-3.5-lightning:free`, consulta `src/database/TRE.MD` e só
+   responde quando consegue fundamentar a resposta em artigos desse código;
+   perguntas fora do escopo eleitoral são recusadas. O contexto recente é
+   separado por usuário e canal, mantido apenas enquanto o processo está ativo
+   e expira após uma hora. As mensagens mencionadas são enviadas à API Roteia.
 
 ## Painel web administrativo
 
@@ -92,6 +101,76 @@ Os testes não conectam ao Discord: usam interações falsas e um banco temporá
 | `/candidatar` | Solicita candidatura em uma eleição, escolhendo cargo e complemento do número. |
 | `/pedidos-candidatura` | Permite ao fundador aceitar ou recusar candidaturas. |
 | `/eleicao` | Sistema eleitoral completo com Urna Eletrônica (criar, iniciar, votar, encerrar, resultados, status, cancelar). |
+| `/proposta` | Apresenta sugestões legislativas/denúncias, apoia iniciativas, acompanha etapas e oferece cédulas privadas. |
+| `/configleicomplementar` | Configura composição parlamentar, cargos, sessão constitucional e parâmetros da simulação (administradores). |
+
+### Sistema legislativo (`/proposta`)
+
+`/proposta criar` abre um modal para PEC, PL, PLP ou denúncia por crime de
+responsabilidade. As proposições são sugestões até decisão de admissibilidade.
+Use `/proposta apoiar` para assinaturas populares ou apoios parlamentares;
+`/proposta consultar` mostra texto, justificativa e histórico. Administradores
+decidem a admissibilidade, iniciam e encerram votações; `/proposta votar` abre
+uma cédula efêmera quando uma DM não foi entregue. O voto também pode ser
+registrado pelos botões enviados por DM. `/proposta alterar-texto` registra a
+redação revisada pela Casa revisora antes da votação dessa etapa.
+
+Etapas implementadas: PEC em quatro turnos e quórum de 3/5; PL e PLP em duas
+Casas com maioria simples ou absoluta, respectivamente, e decisão presidencial
+de sanção/veto total ou parcial; vetos são apreciados pelas duas Casas e só
+são rejeitados com maioria absoluta em cada uma. Quando a Casa revisora altera
+o texto, a votação dessa redação encaminha o projeto à Casa iniciadora para
+votação adicional antes da sanção. Impeachment presidencial exige autorização
+da Câmara e julgamento do Senado por 2/3. Só proposições concluídas são
+publicadas no canal legislativo. Denúncias nunca são publicadas como lei. A
+composição da Casa é congelada em cada votação; vagas não preenchidas contam
+como ausências frente ao total configurado. Votos, apurações e auditoria
+persistem em SQLite e interações concorrentes são serializadas por transações.
+
+#### Configuração e limites jurídicos
+
+1. Ative **Server Members Intent** no Developer Portal e configure o intent no
+   bot. Ele é necessário para conferir a composição e o mandato no momento do
+   voto.
+2. Execute `/configleicomplementar composicao` (padrão: 513 deputados e 81
+   senadores) e `/configleicomplementar cargos`. O número de membros com o
+   cargo pode ser menor que a composição configurada; os assentos vagos contam
+   no denominador do quórum e não podem votar. Não pode ultrapassar o total
+   configurado.
+3. Configure `/configleicomplementar estado-constitucional`, `/prazo` e, quando
+   necessário, `/iniciativa-popular`. O padrão popular de 1.000.000 apoiamentos
+   impede que uma submissão cidadã individual seja tratada como iniciativa
+     formal. Na simulação, a contagem popular não verifica distribuição por
+     estados nem proporção do eleitorado federal; o administrador deve configurar
+     o patamar adequado ao servidor.
+
+Para impeachment, selecione a conta Discord da autoridade denunciada e informe
+seu cargo no modal. A admissibilidade só aceita o Presidente atualmente
+associado ao cargo configurado; outros ritos não estão habilitados. Uma
+condenação pelo Senado remove o cargo presidencial, registra oito anos de
+inabilitação e bloqueia novas candidaturas/decisões pendentes no sistema
+eleitoral. Eleições já abertas com listas de candidatos congeladas não são
+alteradas retroativamente. O campo de provas aceita URLs; anexos binários
+diretos do Discord não são capturados pelo modal.
+
+Uma PEC exige autoria presidencial ou apoio autenticado de pelo menos 1/3 dos
+membros de uma das Casas configuradas. Veto parcial permite registrar até 20
+dispositivos integrais copiados exatamente do texto (cada um deve iniciar com
+identificador de artigo, parágrafo, inciso ou alínea); a publicação remove o
+trecho vetado. A análise automatizada não consegue certificar que o texto
+fornecido corresponde à unidade jurídica completa, portanto a autoridade
+responsável deve revisar isso antes da decisão. A Casa revisora pode registrar
+uma redação consolidada, votá-la e enviá-la à Casa iniciadora; diferenças
+específicas de tramitação de emendas, rejeição apenas de emendas e retorno de
+textos não consolidados dependem de deliberação administrativa. O rito de
+impeachment de outros cargos, iniciativa de Assembleias Legislativas e
+comissões, e reapresentação de matéria substancialmente semelhante dependem de
+instituições/dados não existentes e não são simulados. A análise
+dos limites materiais do art. 60 é uma decisão de admissibilidade humana, não
+uma classificação automática do texto. A simulação presidencial cobre as
+etapas fundamentais, mas não substitui a Lei nº 1.079/1950 nem assessoria
+jurídica. Os canais de publicação e anúncios são os IDs definidos pelo
+servidor no código.
 
 ### Sistema Eleitoral e Urna Eletrônica (`/eleicao`)
 
@@ -147,13 +226,20 @@ src/
 │   ├── pedidos-filiacao.js
 │   ├── candidatar.js
 │   ├── pedidos-candidatura.js
-│   └── eleicao.js              # comando /eleicao e handlers da urna
+│   ├── eleicao.js              # comando /eleicao e handlers da urna
+│   ├── proposta.js             # proposições, tramitação e cédulas legislativas
+│   └── configleicomplementar.js # composição e regras legislativas
 ├── database/
 │   ├── index.js                # partidos, filiações e cadastro (partidos.db)
 │   ├── eleicoes.js             # eleições, votos, apuração e agendamento (eleicoes.db)
+│   └── legislativo.js          # proposições, votos parlamentares e auditoria
 │   ├── partidos.db             # banco de partidos
 │   └── eleicoes.db             # banco relacional de eleições
 ├── services/
+│   ├── legislativo/
+│   │   ├── quorum.js            # regras centrais de presença e aprovação
+│   │   ├── fluxo.js             # etapas de PEC, PL, PLP e impeachment
+│   │   └── sistema.js           # elegibilidade, votação e publicação
 │   └── eleicoes/
 │       ├── candidatos-service.js   # leitura e congelamento de candidaturas
 │       ├── permissoes-service.js   # validação admin, eleitorado e auditoria

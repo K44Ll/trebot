@@ -27,6 +27,7 @@ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
 
 const criarTabelaPropostas = () =>
     db.exec(`
@@ -245,6 +246,18 @@ db.exec(`
 `);
 
 const agora = () => new Date().toISOString();
+
+function obterInabilitacaoAtiva(guildId, discordId) {
+    const tabela = db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'legislativo_inabilitacoes'")
+        .get();
+    if (!tabela) return null;
+    return db.prepare(`
+        SELECT fim_em FROM legislativo_inabilitacoes
+         WHERE guild_id = ? AND discord_id = ? AND fim_em > ?
+         ORDER BY fim_em DESC LIMIT 1
+    `).get(guildId, discordId, agora()) ?? null;
+}
 
 function paraObjeto(linha) {
     if (!linha) return null;
@@ -656,6 +669,10 @@ function registrarCandidato({ guildId, eleicaoId, politicoId, cargo }) {
     if (!CARGOS_ELEITORAIS.includes(cargo)) {
         throw new RangeError('O cargo informado não é um cargo eleitoral válido.');
     }
+    const inabilitacao = obterInabilitacaoAtiva(guildId, politicoId);
+    if (inabilitacao) {
+        throw new Error(`Você está inabilitado para exercer função pública até ${inabilitacao.fim_em}.`);
+    }
 
     const eleicao = obterEleicao(guildId, eleicaoId);
     if (!eleicao) {
@@ -692,6 +709,20 @@ function registrarCandidato({ guildId, eleicaoId, politicoId, cargo }) {
 }
 
 function listarCandidatos(guildId, eleicaoId) {
+    const existeInabilitacao = Boolean(db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'legislativo_inabilitacoes'")
+        .get());
+    const filtroInabilitacao = existeInabilitacao
+        ? `AND NOT EXISTS (
+               SELECT 1 FROM legislativo_inabilitacoes inab
+                WHERE inab.guild_id = candidatos.guild_id
+                  AND inab.discord_id = candidatos.politico_id
+                  AND inab.fim_em > ?
+           )`
+        : '';
+    const parâmetros = existeInabilitacao
+        ? [guildId, eleicaoId, agora()]
+        : [guildId, eleicaoId];
     return db
         .prepare(`
             SELECT candidatos.*, politicos.nome AS politico_nome,
@@ -705,9 +736,10 @@ function listarCandidatos(guildId, eleicaoId) {
                 ON partidos.guild_id = candidatos.guild_id
                AND partidos.id = candidatos.partido_id
              WHERE candidatos.guild_id = ? AND candidatos.eleicao_id = ?
+               ${filtroInabilitacao}
              ORDER BY candidatos.cargo, politicos.nome COLLATE NOCASE
         `)
-        .all(guildId, eleicaoId);
+        .all(...parâmetros);
 }
 
 function listarPartidosParaFiliacao(guildId) {
@@ -972,6 +1004,10 @@ function solicitarCandidatura({
     sufixo = ''
 }) {
     return db.transaction(() => {
+        const inabilitacao = obterInabilitacaoAtiva(guildId, politicoId);
+        if (inabilitacao) {
+            throw new Error(`Você está inabilitado para exercer função pública até ${inabilitacao.fim_em}.`);
+        }
         const eleicao = obterEleicao(guildId, eleicaoId);
         if (!eleicao) throw new Error('A eleição não existe neste servidor.');
 
@@ -1129,6 +1165,16 @@ function decidirPedidoCandidatura({
                  WHERE id = ?
             `).run(agora(), pedidoId);
             return { resultado: 'partido_inativo' };
+        }
+        if (aceitar) {
+            const inabilitacao = obterInabilitacaoAtiva(guildId, pedido.politico_id);
+            if (inabilitacao) {
+                db.prepare(`
+                    UPDATE candidatos SET status = 'recusado', decidido_em = ?
+                     WHERE id = ?
+                `).run(agora(), pedidoId);
+                return { resultado: 'inabilitado', fim_em: inabilitacao.fim_em };
+            }
         }
 
         const timestamp = agora();

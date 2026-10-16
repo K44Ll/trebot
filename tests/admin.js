@@ -333,6 +333,9 @@ async function main() {
             cookie
         );
         assert.equal(invalidChannel.status, 400);
+        const invalidHtml = await invalidChannel.text();
+        assert.match(invalidHtml, /O canal informado não é um canal de texto/);
+        assert.match(invalidHtml, /Painel eleitoral/);
         assert.equal(database.obterConfiguracao(guild.id).minimoApoios, 3);
 
         database.salvarIdentidade({

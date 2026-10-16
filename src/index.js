@@ -14,12 +14,23 @@ require('dotenv').config();
 
 const database = require('./database');
 const databaseEleicoes = require('./database/eleicoes');
+const databaseLegislativo = require('./database/legislativo');
 const { iniciarPainel } = require('./web/admin');
 const { animarInicializacao } = require('./ui/console');
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
-});
+const intents = [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages
+];
+
+// Message Content is privileged and the mention assistant is optional. Avoid
+// requesting it unless the assistant has actually been configured.
+if (process.env.ROTEIA_KEY?.trim()) {
+    intents.push(GatewayIntentBits.MessageContent);
+}
+
+const client = new Client({ intents });
 
 client.animacaoInicializacao = animarInicializacao();
 client.adminPanel = null;
@@ -149,7 +160,10 @@ if (!adminPassword) {
     client.adminPanel = {
         host,
         port,
-        cookieSecure: process.env.ADMIN_COOKIE_SECURE !== 'false',
+        cookieSecure:
+            process.env.ADMIN_COOKIE_SECURE !== undefined
+                ? process.env.ADMIN_COOKIE_SECURE !== 'false'
+                : Boolean(process.env.ADMIN_PUBLIC_ORIGIN?.startsWith('https://')),
         server: null,
         error: null
     };
@@ -167,6 +181,7 @@ if (!adminPassword) {
                 cookieSecure: client.adminPanel.cookieSecure,
                 publicOrigin: process.env.ADMIN_PUBLIC_ORIGIN,
                 database,
+                databaseEleicoes,
                 getGuilds: () => client.guilds.cache.values(),
                 getTextChannel: async (guildId, channelId) => {
                     const guild = client.guilds.cache.get(guildId);
@@ -183,6 +198,26 @@ if (!adminPassword) {
                         return null;
                     }
                     return channel;
+                },
+                getTextChannels: async (guildId) => {
+                    const guild = client.guilds.cache.get(guildId);
+                    if (!guild) return [];
+                    try {
+                        const channels = await guild.channels.fetch();
+                        return Array.from(channels.values())
+                            .filter(
+                                c =>
+                                    c &&
+                                    [
+                                        ChannelType.GuildText,
+                                        ChannelType.GuildAnnouncement
+                                    ].includes(c.type)
+                            )
+                            .map(c => ({ id: c.id, name: c.name }))
+                            .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+                    } catch {
+                        return [];
+                    }
                 }
             });
             client.adminPanel.server = painel;
@@ -203,13 +238,17 @@ client.login(token).catch(error => {
 });
 
 for (const sinal of ['SIGINT', 'SIGTERM']) {
-    process.on(sinal, () => {
+    process.on(sinal, async () => {
         console.log(`\n[${sinal}] Encerrando...`);
+        clearInterval(client.legislativoScheduler);
+        await client.legislativoRun?.catch(error => {
+            console.error('[LEGISLATIVO ERROR] Falha durante encerramento:', error);
+        });
         client.adminPanel?.server?.close();
         client.destroy();
         database.fechar();
         databaseEleicoes.fechar();
+        databaseLegislativo.fechar();
         process.exit(0);
     });
 }
-

@@ -93,7 +93,7 @@ function page(title, content) {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)} | TRE BOT</title>
   <style>
-    :root{color-scheme:light;--ink:#16233b;--muted:#63718a;--blue:#2457a7;--line:#dce3ed;--paper:#f3f6fb;--white:#fff;--green:#16794a;--amber:#97610a}
+    :root{color-scheme:light;--ink:#16233b;--muted:#63718a;--blue:#2457a7;--line:#dce3ed;--paper:#f3f6fb;--white:#fff;--green:#16794a;--amber:#97610a;--red:#b91c1c}
     *{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
     header{background:#172b4d;color:#fff;padding:20px max(24px,calc((100% - 1120px)/2));display:flex;align-items:center;justify-content:space-between;gap:20px}
     header strong{font-size:18px;letter-spacing:.04em}header span{color:#d7e2f3;font-size:13px}
@@ -103,12 +103,19 @@ function page(title, content) {
     .metric{font-size:28px;font-weight:700}.metric-label{color:var(--muted);font-size:13px}
     form{margin:0}.controls{display:flex;gap:12px;align-items:end;flex-wrap:wrap}.field{display:grid;gap:6px;min-width:180px;flex:1}
     label{font-size:13px;font-weight:650}input,select{font:inherit;color:var(--ink);background:white;border:1px solid #b8c4d4;border-radius:7px;padding:10px 11px;width:100%}
-    button{border:0;background:var(--blue);color:white;font:inherit;font-weight:650;border-radius:7px;padding:10px 15px;cursor:pointer}button:hover{filter:brightness(.92)}.secondary{background:#e8edf5;color:var(--ink)}
+    button{border:0;background:var(--blue);color:white;font:inherit;font-weight:650;border-radius:7px;padding:10px 15px;cursor:pointer;transition:filter .15s}button:hover{filter:brightness(.92)}.secondary{background:#e8edf5;color:var(--ink)}
     .topline{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:20px}.topline p{margin:0}
     .table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;min-width:650px}th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);vertical-align:top}th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}td small{display:block;color:var(--muted);margin-top:2px}
-    .pill{display:inline-block;border-radius:999px;background:#fff0d2;color:#744900;padding:3px 9px;font-size:12px;font-weight:650}.pill.green{background:#e0f5e9;color:#17633e}
+    .pill{display:inline-block;border-radius:999px;background:#fff0d2;color:#744900;padding:3px 9px;font-size:12px;font-weight:650}
+    .pill.green{background:#e0f5e9;color:#17633e}
+    .pill.blue{background:#e1effe;color:#1e429f}
+    .pill.red{background:#fde8e8;color:#9b1c1c}
+    .pill.amber{background:#fef08a;color:#713f12}
     .bar{height:7px;background:#e8edf5;border-radius:999px;margin-top:7px;overflow:hidden}.bar span{display:block;height:100%;background:#3478d4}
-    .alert{border-radius:8px;padding:11px 13px;margin-bottom:16px;background:#fff0d2;color:#744900}.login{width:min(420px,calc(100% - 32px));margin:9vh auto}
+    .alert{border-radius:8px;padding:11px 13px;margin-bottom:16px;background:#fff0d2;color:#744900;border:1px solid #fed7aa}
+    .alert.error{background:#fde8e8;color:#9b1c1c;border:1px solid #f8b4b4}
+    .alert.success{background:#e0f5e9;color:#17633e;border:1px solid #bcf0da}
+    .login{width:min(420px,calc(100% - 32px));margin:9vh auto}
     footer{color:var(--muted);font-size:12px;margin-top:22px}
     @media(max-width:600px){header{padding:16px}main{margin-top:18px}.topline{align-items:flex-start;flex-direction:column}.card{padding:16px}}
   </style>
@@ -120,13 +127,14 @@ function page(title, content) {
 </html>`;
 }
 
-function loginPage(message = '') {
+function loginPage(message = '', isError = true) {
+    const alertClass = isError ? 'alert error' : 'alert';
     return page(
         'Entrar',
         `<main class="login"><section class="card">
           <h1>Painel administrativo</h1>
           <p class="muted">Entre com a senha administrativa configurada no servidor.</p>
-          ${message ? `<div class="alert" role="alert">${escapeHtml(message)}</div>` : ''}
+          ${message ? `<div class="${alertClass}" role="alert">${escapeHtml(message)}</div>` : ''}
           <form method="post" action="/login">
             <input type="hidden" name="action" value="login">
             <div class="field"><label for="password">Senha</label><input id="password" name="password" type="password" autocomplete="current-password" required autofocus></div>
@@ -151,7 +159,7 @@ function proposalsTable(proposals, minimum) {
             return `<tr>
               <td><strong>${escapeHtml(proposal.emoji)} ${escapeHtml(proposal.nome)} (${escapeHtml(proposal.sigla)})</strong><small>Fundador: ${escapeHtml(proposal.fundadorNome)} · ${escapeHtml(proposal.fundadorId)}</small></td>
               <td>${escapeHtml(proposal.posicionamento || '—')}</td>
-              <td><span class="pill${founded ? ' green' : ''}">${escapeHtml(proposal.status)}</span></td>
+              <td><span class="pill${founded ? ' green' : ' amber'}">${escapeHtml(proposal.status)}</span></td>
               <td>${escapeHtml(proposal.totalApoios)} / ${escapeHtml(minimum)}<div class="bar"><span style="width:${progress}%"></span></div></td>
             </tr>`;
         })
@@ -170,21 +178,75 @@ function partiesTable(parties) {
 
     const rows = parties
         .map(
-            party => `<tr>
-              <td><strong>${escapeHtml(party.emoji)} ${escapeHtml(party.nome)} (${escapeHtml(party.sigla)})</strong><small>Fundador: ${escapeHtml(party.fundador_nome)}</small></td>
-              <td>${escapeHtml(party.posicionamento)}</td>
-              <td>${escapeHtml(new Date(party.fundado_em).toLocaleString('pt-BR'))}</td>
+            party => {
+                const ativo = (party.status || 'ativo') === 'ativo';
+                return `<tr>
+                  <td><strong>${escapeHtml(party.emoji)} ${escapeHtml(party.nome)} (${escapeHtml(party.sigla)})</strong><small>Fundador: ${escapeHtml(party.fundador_nome)}</small></td>
+                  <td>${party.numero_eleitoral ? `<span class="pill blue">${escapeHtml(party.numero_eleitoral)}</span>` : '—'}</td>
+                  <td>${escapeHtml(party.posicionamento)}</td>
+                  <td><span class="pill ${ativo ? 'green' : 'red'}">${escapeHtml(party.status || 'ativo')}</span></td>
+                  <td>${escapeHtml(new Date(party.fundado_em).toLocaleString('pt-BR'))}</td>
+                </tr>`;
+            }
+        )
+        .join('');
+
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Partido</th><th>Número</th><th>Posicionamento</th><th>Status</th><th>Fundado em</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>`;
+}
+
+function electionsTable(elections) {
+    if (!elections || !elections.length) {
+        return '<p class="muted">Nenhuma eleição cadastrada para este servidor ainda.</p>';
+    }
+
+    const statusPill = status => {
+        switch (status) {
+            case 'aberta':
+                return '<span class="pill green">Em votação</span>';
+            case 'encerrada':
+                return '<span class="pill">Encerrada</span>';
+            case 'cancelada':
+                return '<span class="pill red">Cancelada</span>';
+            case 'configurada':
+                return '<span class="pill amber">Configurada</span>';
+            default:
+                return `<span class="pill">${escapeHtml(status)}</span>`;
+        }
+    };
+
+    const rows = elections
+        .map(
+            eleicao => `<tr>
+              <td><strong>${escapeHtml(eleicao.nome)}</strong><small>ID: ${escapeHtml(eleicao.eleicaoRefId || eleicao.id)} · Estado: ${escapeHtml(eleicao.estado || 'BR')}</small></td>
+              <td>${escapeHtml(eleicao.eleitorado === 'filiados' ? 'Filiados a partidos' : 'Todos os membros')}</td>
+              <td><span class="pill blue">${escapeHtml(eleicao.turno || 1)}º Turno</span></td>
+              <td>${statusPill(eleicao.status)}</td>
+              <td>${eleicao.duracaoMinutos ? `${escapeHtml(eleicao.duracaoMinutos)} min` : 'Manual'}<small>${eleicao.abertaEm ? new Date(eleicao.abertaEm).toLocaleString('pt-BR') : 'Não iniciada'}</small></td>
             </tr>`
         )
         .join('');
 
     return `<div class="table-wrap"><table>
-      <thead><tr><th>Partido</th><th>Posicionamento</th><th>Fundado em</th></tr></thead>
+      <thead><tr><th>Eleição</th><th>Eleitorado</th><th>Turno</th><th>Status</th><th>Duração / Início</th></tr></thead>
       <tbody>${rows}</tbody>
     </table></div>`;
 }
 
-function dashboardPage({ guilds, selectedGuild, config, proposals, parties, csrf, message = '' }) {
+function dashboardPage({
+    guilds,
+    selectedGuild,
+    config,
+    proposals,
+    parties,
+    elections = [],
+    channels = [],
+    csrf,
+    message = '',
+    isError = false
+}) {
     const options = guilds
         .map(
             guild =>
@@ -194,6 +256,8 @@ function dashboardPage({ guilds, selectedGuild, config, proposals, parties, csrf
     const pending = proposals.filter(
         proposal => proposal.status === 'Aguardando apoiadores'
     ).length;
+    const activeElection = (elections || []).find(e => e.status === 'aberta');
+    const alertClass = isError ? 'alert error' : 'alert success';
 
     return page(
         'Administração',
@@ -201,23 +265,36 @@ function dashboardPage({ guilds, selectedGuild, config, proposals, parties, csrf
           <div class="topline"><div><h1>Painel eleitoral</h1><p class="muted">Configurações e acompanhamento por servidor do Discord.</p></div>
             <form method="post" action="/logout"><input type="hidden" name="csrf" value="${escapeHtml(csrf)}"><button class="secondary" type="submit">Sair</button></form>
           </div>
-          ${message ? `<div class="alert" role="status">${escapeHtml(message)}</div>` : ''}
+          ${message ? `<div class="${alertClass}" role="${isError ? 'alert' : 'status'}">${escapeHtml(message)}</div>` : ''}
+          ${activeElection ? `<div class="alert success" role="status">🗳️ <strong>Eleição em andamento:</strong> ${escapeHtml(activeElection.nome)} (${escapeHtml(activeElection.turno || 1)}º turno) — Votação aberta na urna eletrônica!</div>` : ''}
           <section class="card">
             <form method="get" action="/">
-              <div class="controls"><div class="field"><label for="guildId">Servidor</label><select id="guildId" name="guildId">${options}</select></div><button type="submit">Abrir servidor</button></div>
+              <div class="controls"><div class="field"><label for="guildId">Servidor selecionado</label><select id="guildId" name="guildId" onchange="this.form.submit()">${options}</select></div><button type="submit">Trocar servidor</button></div>
             </form>
           </section>
           <section class="grid">
             <div class="card"><div class="metric">${proposals.length}</div><div class="metric-label">Propostas registradas</div></div>
             <div class="card"><div class="metric">${pending}</div><div class="metric-label">Aguardando apoios</div></div>
             <div class="card"><div class="metric">${parties.length}</div><div class="metric-label">Partidos fundados</div></div>
+            <div class="card"><div class="metric">${elections.length}</div><div class="metric-label">Eleições registradas</div></div>
           </section>
+          <section class="card"><h2>Eleições</h2>${electionsTable(elections)}</section>
           <section class="card"><h2>Configuração eleitoral</h2>
             <form method="post" action="/config">
               <input type="hidden" name="csrf" value="${escapeHtml(csrf)}">
               <input type="hidden" name="guildId" value="${escapeHtml(selectedGuild.id)}">
               <div class="controls">
-                <div class="field"><label for="canalApoioId">ID do canal de apoio</label><input id="canalApoioId" name="canalApoioId" inputmode="numeric" pattern="[0-9]{17,20}" value="${escapeHtml(config.canalApoioId || '')}" placeholder="ID do canal no Discord" required></div>
+                <div class="field"><label for="canalApoioId">Canal de apoio</label>
+                  ${channels && channels.length > 0 ? `
+                  <select id="canalApoioId" name="canalApoioId" required>
+                    <option value="" disabled ${!config.canalApoioId ? 'selected' : ''}>Selecione um canal de texto...</option>
+                    ${channels.map(ch => `<option value="${escapeHtml(ch.id)}"${ch.id === config.canalApoioId ? ' selected' : ''}>#${escapeHtml(ch.name)} (${escapeHtml(ch.id)})</option>`).join('')}
+                    ${config.canalApoioId && !channels.some(ch => ch.id === config.canalApoioId) ? `<option value="${escapeHtml(config.canalApoioId)}" selected>Canal configurado (${escapeHtml(config.canalApoioId)})</option>` : ''}
+                  </select>
+                  ` : `
+                  <input id="canalApoioId" name="canalApoioId" inputmode="numeric" pattern="[0-9]{17,20}" value="${escapeHtml(config.canalApoioId || '')}" placeholder="ID do canal no Discord" required>
+                  `}
+                </div>
                 <div class="field"><label for="minimoApoios">Apoios necessários</label><input id="minimoApoios" name="minimoApoios" type="number" min="1" max="500" value="${escapeHtml(config.minimoApoios)}" required></div>
                 <button type="submit">Salvar configuração</button>
               </div>
@@ -234,14 +311,25 @@ function dashboardPage({ guilds, selectedGuild, config, proposals, parties, csrf
 function createAdminServer({
     password,
     database,
+    databaseEleicoes = null,
     getGuilds,
     getTextChannel,
+    getTextChannels = null,
     cookieSecure = true,
     publicOrigin = '',
     logger = console
 }) {
     if (typeof password !== 'string' || password.length < 16) {
         throw new Error('ADMIN_PASSWORD deve conter pelo menos 16 caracteres.');
+    }
+
+    let dbEleicoes = databaseEleicoes;
+    if (!dbEleicoes) {
+        try {
+            dbEleicoes = require('../database/eleicoes');
+        } catch {
+            dbEleicoes = null;
+        }
     }
 
     const expectedPasswordHash = passwordHash(password);
@@ -253,7 +341,7 @@ function createAdminServer({
         response.writeHead(status, {
             'Content-Type': 'text/html; charset=utf-8',
             'Cache-Control': 'no-store',
-            'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+            'Content-Security-Policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
             'Referrer-Policy': 'no-referrer',
             'X-Content-Type-Options': 'nosniff',
             'X-Frame-Options': 'DENY',
@@ -298,7 +386,9 @@ function createAdminServer({
 
     function validOrigin(request) {
         const origin = request.headers.origin;
-        if (!origin) return true;
+        // POSTs do not need to work from non-browser clients. Requiring Origin
+        // prevents a cross-site form from relying only on cookie defaults.
+        if (!origin) return false;
         try {
             const parsedOrigin = new URL(origin);
             if (
@@ -403,6 +493,15 @@ function createAdminServer({
             const config = database.obterConfiguracao(selectedGuild.id);
             const proposals = database.listarPropostas(selectedGuild.id);
             const parties = database.listarPartidos(selectedGuild.id);
+            const elections = dbEleicoes ? dbEleicoes.listarEleicoes(selectedGuild.id) : [];
+            let textChannels = [];
+            if (getTextChannels) {
+                try {
+                    textChannels = await getTextChannels(selectedGuild.id);
+                } catch {
+                    textChannels = [];
+                }
+            }
             return send(
                 response,
                 200,
@@ -412,9 +511,11 @@ function createAdminServer({
                     config,
                     proposals,
                     parties,
+                    elections,
+                    channels: textChannels,
                     csrf: authenticated.session.csrf,
                     message: url.searchParams.get('saved')
-                        ? 'Configuração salva.'
+                        ? 'Configuração salva com sucesso.'
                         : ''
                 })
             );
@@ -497,6 +598,7 @@ function createAdminServer({
         }
 
         if (url.pathname === '/config' && form.action === '') {
+            const guilds = getAvailableGuilds();
             const guild = resolveGuild(form.guildId);
             const minimoApoios = Number(form.minimoApoios);
             if (
@@ -506,19 +608,73 @@ function createAdminServer({
                 minimoApoios > 500 ||
                 !SNOWFLAKE_PATTERN.test(form.canalApoioId)
             ) {
+                const selectedGuild = guild || guilds[0];
+                if (selectedGuild) {
+                    const config = database.obterConfiguracao(selectedGuild.id);
+                    const proposals = database.listarPropostas(selectedGuild.id);
+                    const parties = database.listarPartidos(selectedGuild.id);
+                    const elections = dbEleicoes ? dbEleicoes.listarEleicoes(selectedGuild.id) : [];
+                    let textChannels = [];
+                    if (getTextChannels) {
+                        try {
+                            textChannels = await getTextChannels(selectedGuild.id);
+                        } catch {
+                            textChannels = [];
+                        }
+                    }
+                    return send(
+                        response,
+                        400,
+                        dashboardPage({
+                            guilds,
+                            selectedGuild,
+                            config,
+                            proposals,
+                            parties,
+                            elections,
+                            channels: textChannels,
+                            csrf: authenticated.session.csrf,
+                            message: 'Servidor, canal ou número de apoios inválido. Verifique os dados e tente novamente.',
+                            isError: true
+                        })
+                    );
+                }
                 return send(
                     response,
                     400,
-                    loginPage('Servidor, canal ou número de apoios inválido. Reabra o painel e tente novamente.')
+                    page('Erro de configuração', '<main class="stack"><div class="alert error">Servidor, canal ou número de apoios inválido.</div></main>')
                 );
             }
 
             const channel = await getTextChannel(guild.id, form.canalApoioId);
             if (!channel) {
+                const config = database.obterConfiguracao(guild.id);
+                const proposals = database.listarPropostas(guild.id);
+                const parties = database.listarPartidos(guild.id);
+                const elections = dbEleicoes ? dbEleicoes.listarEleicoes(guild.id) : [];
+                let textChannels = [];
+                if (getTextChannels) {
+                    try {
+                        textChannels = await getTextChannels(guild.id);
+                    } catch {
+                        textChannels = [];
+                    }
+                }
                 return send(
                     response,
                     400,
-                    loginPage('O canal informado não é um canal de texto acessível do servidor selecionado.')
+                    dashboardPage({
+                        guilds,
+                        selectedGuild: guild,
+                        config,
+                        proposals,
+                        parties,
+                        elections,
+                        channels: textChannels,
+                        csrf: authenticated.session.csrf,
+                        message: 'O canal informado não é um canal de texto acessível do servidor selecionado.',
+                        isError: true
+                    })
                 );
             }
 
